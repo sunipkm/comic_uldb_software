@@ -1,0 +1,8 @@
+**/target
+**/.DS_Store
+**/*.log
+**/*.ini
+**/*.png
+!server/res/*.png
+!gui/assets/*.png
+!gui/res/*.png

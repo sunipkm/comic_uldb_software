@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = [
+    "gui",
+    "packet",
+    "server",
+]
+
+[workspace.dependencies]
+packet = { path = "packet" }
+generic-camera = { version = ">= 0.0.10" }
+bincode = { version = "1.3" }
