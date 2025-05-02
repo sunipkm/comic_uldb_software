@@ -6,3 +6,7 @@ edition = "2021"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 generic-camera = { workspace = true, features = ["server"] }
+refimage = { workspace = true }
+serde_json = { version = "1.0" }
+chrono = { version = "0.4", features = ["std", "clock", "serde"] }
+ublox-gps-tec = { workspace = true }
