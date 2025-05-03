@@ -1,24 +1,20 @@
 use std::{
-    env,
-    fs::OpenOptions,
-    io::{self, Write},
-    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
     thread::{self, sleep},
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 
-use generic_camera::GenCamDriver;
+use generic_camera::{AnyGenCam, GenCamDriver};
 
-use chrono::{DateTime, Local, Utc};
+use chrono::Utc;
 use generic_camera_asi::{
     controls::{AnalogCtrl, DeviceCtrl, ExposureCtrl, SensorCtrl},
     GenCamCtrl, GenCamDriverAsi, GenCamError, GenCamPixelBpp, GenCamRoi, PropertyValue,
 };
-use image::imageops::FilterType;
+use log::warn;
 use refimage::GenericImageOwned;
 #[allow(unused_imports)]
 use refimage::{
@@ -26,23 +22,20 @@ use refimage::{
     OptimumExposureBuilder, ToLuma,
 };
 
+use packet::{CameraCommand, CameraConfig, Outgoing, TempReadout};
 #[cfg(any(feature = "uhubctl_pi", feature = "uhubctl_toradex"))]
 use std::process::Command;
 use tokio::sync::broadcast;
-use packet::TempReadout;
-use packet::{CameraConfig, CameraImageSav, CameraRoi, CameraSettings, CameraCommand};
 
-fn get_out_dir() -> PathBuf {
-    PathBuf::from(env::var("OUT_DIR").unwrap_or("./".to_owned()))
-}
+use crate::REFCLK;
 
-pub fn camera_thread(
+pub async fn camera_thread(
     main_run: Arc<AtomicBool>,
-    cfg: CameraConfig,
-    image_source: broadcast::Sender<GenericImageOwned>,
-    temp_sink: broadcast::Sender<TempReadout>,
-    _config_source: broadcast::Receiver<CameraCommand>,
+    cfg: &mut CameraConfig,
+    data_sender: broadcast::Sender<Outgoing>,
+    config_source: broadcast::Receiver<CameraCommand>,
 ) {
+    let mut data_sender = data_sender;
     #[cfg(any(feature = "uhubctl_pi", feature = "uhubctl_toradex"))]
     let uhubctl = {
         let cmd = if cfg!(feature = "uhubctl_toradex") {
@@ -52,27 +45,23 @@ pub fn camera_thread(
         };
         match cmd {
             Ok(_) => {
-                println!("uhubctl exists");
+                log::info!("uhubctl exists");
                 false
             }
             Err(e) => {
-                println!("Error starting uhubctl: {:#?}", e);
+                log::info!("Error starting uhubctl: {:#?}", e);
                 true
             }
         }
     };
 
     // main loop
-    let tsink_main = temp_sink.clone();
+    let tsink_main = data_sender.clone();
     while main_run.load(Ordering::SeqCst) {
-        let mut logfile = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(get_out_dir().join("asicam.log"))
-            .expect("Error opening log file");
+        let mut cfs = config_source.resubscribe();
         let mut drv = GenCamDriverAsi;
         let num_cameras = drv.available_devices();
-        println!("Found {} cameras", num_cameras);
+        log::info!("Found {} cameras", num_cameras);
         if num_cameras == 0 {
             return;
         }
@@ -81,7 +70,7 @@ pub fn camera_thread(
 
         let mut cam = {
             if let Some(cam_name) = &cfg.name {
-                println!("Connecting to camera: {}", cam_name);
+                log::info!("Connecting to camera: {}", cam_name);
                 let devlist = drv.list_devices().expect("Could not list devices");
                 let dev = devlist
                     .iter()
@@ -93,11 +82,9 @@ pub fn camera_thread(
                     .expect("Error connecting to camera")
             }
         };
-        let info = cam.info().expect("Error getting camera info").clone();
-        println!("{:?}", info);
 
         let caminfo = cam.info_handle().expect("Error getting camera handle");
-
+        let (sender, receiver) = std::sync::mpsc::channel();
         let camthread = {
             let main_run = main_run.clone();
             let sub_run = sub_run.clone();
@@ -107,25 +94,28 @@ pub fn camera_thread(
                     while sub_run.load(Ordering::SeqCst) && main_run.load(Ordering::SeqCst) {
                         // let caminfo = cam;
                         sleep(Duration::from_secs(1));
+                        if let Ok(cmd) = cfs.try_recv() {
+                            sender.send(cmd).unwrap();
+                        }
                         let (temp, _) = caminfo
                             .get_property(GenCamCtrl::Device(DeviceCtrl::Temperature))
                             .unwrap_or((PropertyValue::from(-273.15), false));
-                        let dtime = Utc::now();
+                        let dtime = Instant::now();
                         let meas = TempReadout {
-                            now: dtime,
-                            readings: vec![(
+                            now: dtime - *REFCLK,
+                            readings: (
                                 "CCD".to_string(),
-                                temp.clone().try_into().unwrap_or(-273.15) as f32,
-                            )],
+                                ((temp.clone().try_into().unwrap_or(-273.15) as f32) * 1000.0)
+                                    .round() as i32,
+                            ),
                         };
-                        if let Err(e) = sink.send(meas) {
-                            println!("Error sending temp readout: {:#?}", e);
+                        if let Err(e) = sink.send(meas.into()) {
+                            log::warn!("Error sending temp readout: {:#?}", e);
                         }
                         // let stdout = io::stdout();
                         // let _ = write!(&mut stdout.lock(),
-                        print!(
-                            "[{}] Camera temperature: {:>+05.1} C, Cooler Power: {:>3}%\t",
-                            dtime.format("%H:%M:%S"),
+                        log::info!(
+                            "Camera temperature: {:>+05.1} C, Cooler Power: {:>3}%\t",
                             temp.try_into().unwrap_or(-273.15),
                             caminfo
                                 .get_property(GenCamCtrl::Device(DeviceCtrl::CoolerPower))
@@ -134,64 +124,130 @@ pub fn camera_thread(
                                 .try_into()
                                 .unwrap_or(-1i64)
                         );
-                        io::stdout().flush().unwrap();
-                        print!("\r");
                     }
                     if let Err(e) = caminfo.cancel_capture() {
-                        println!("Error cancelling capture: {:#?}", e);
+                        log::warn!("Error cancelling capture: {:#?}", e);
                     }
-                    println!("\nExiting housekeeping thread");
+                    log::info!("\nExiting housekeeping thread");
                 }
             })
         };
+        image_capture(
+            main_run.clone(),
+            sub_run,
+            &mut cam,
+            cfg,
+            &mut data_sender,
+            receiver,
+            uhubctl,
+        )
+        .await;
+        camthread.join().unwrap();
+    }
+    log::info!("\nExiting");
+}
 
-        if let Some(color) = info.info.get("Color Sensor") {
-            if let Some(color) = color.as_bool() {
-                if !color {
-                    println!("Setting pixel format to 16-bit");
-                    cam.set_property(
-                        SensorCtrl::PixelFormat.into(),
-                        &GenCamPixelBpp::Bpp16.into(),
-                        false,
-                    )
-                    .expect("Error setting pixel format");
+async fn image_capture(
+    main_run: Arc<AtomicBool>,
+    sub_run: Arc<AtomicBool>,
+    cam: &mut AnyGenCam,
+    cfg: &mut CameraConfig,
+    data_sender: &mut broadcast::Sender<Outgoing>,
+    rcv: std::sync::mpsc::Receiver<CameraCommand>,
+    uhubctl: bool,
+) {
+    let info = cam.info().expect("Error getting camera info").clone();
+
+    if let Some(color) = info.info.get("Color Sensor") {
+        if let Some(color) = color.as_bool() {
+            if !color {
+                log::info!("Setting pixel format to 16-bit");
+                cam.set_property(
+                    SensorCtrl::PixelFormat.into(),
+                    &GenCamPixelBpp::Bpp16.into(),
+                    false,
+                )
+                .expect("Error setting pixel format");
+            }
+        }
+    }
+
+    let mut rcmd = None;
+    let mut magic = 0;
+    let mut ncfg = cfg.clone();
+    'cfg_loop: while main_run.load(Ordering::Relaxed) {
+        let mut cmd_rcv = false;
+        let mut cmd_success = true;
+        if let Some(cmd) = rcmd.take() {
+            cmd_rcv = true;
+            match cmd {
+                CameraCommand::Roi(m, roi) => {
+                    ncfg.roi = roi;
+                    magic = m;
+                    log::info!("Received ROI command: {:#?}", ncfg.roi);
+                }
+                CameraCommand::ExposureConf(m, expconf) => {
+                    magic = m;
+                    ncfg.autoexp = expconf;
+                    log::info!("Received exposure command: {:#?}", ncfg.autoexp);
+                }
+                CameraCommand::Settings(m, settings) => {
+                    magic = m;
+                    ncfg.settings = settings;
+                    log::info!("Received settings command: {:#?}", ncfg.settings);
+                }
+                CameraCommand::FullConf(m, fcfg) => {
+                    magic = m;
+                    ncfg = fcfg;
+                    log::info!("Received full config command: {:#?}", ncfg);
                 }
             }
         }
-
-        println!("Setting target temperature: {} C", cfg.settings.target_temp);
+        log::info!(
+            "Setting target temperature: {} C",
+            ncfg.settings.target_temp
+        );
         if cam
             .set_property(
                 GenCamCtrl::Device(DeviceCtrl::CoolerTemp),
-                &PropertyValue::Int(cfg.settings.target_temp as i64),
+                &PropertyValue::Int(ncfg.settings.target_temp as i64),
                 false,
             )
             .is_err()
         {
-            println!("Error setting target temperature");
+            cmd_success = false;
+            log::info!("Error setting target temperature");
         }
 
-        if cfg.roi.change_roi() {
+        if ncfg.roi.change_roi() {
             let roi = cam.get_roi();
-            println!(
+            log::info!(
                 "Current ROI: {}x{} @ {}x{}",
-                roi.width, roi.height, roi.x_min, roi.y_min
+                roi.width,
+                roi.height,
+                roi.x_min,
+                roi.y_min
             );
             if let Err(e) = cam.set_roi(&GenCamRoi {
-                width: (cfg.roi.x_max - cfg.roi.x_min) as _,
-                height: (cfg.roi.y_max - cfg.roi.y_min) as _,
-                x_min: cfg.roi.x_min as _,
-                y_min: cfg.roi.y_min as _,
+                width: (ncfg.roi.x_max - ncfg.roi.x_min) as _,
+                height: (ncfg.roi.y_max - ncfg.roi.y_min) as _,
+                x_min: ncfg.roi.x_min as _,
+                y_min: ncfg.roi.y_min as _,
             }) {
-                println!("Error setting ROI: {:#?}", e);
+                cmd_success = false;
+                ncfg.roi = cfg.roi.clone(); // reset to default
+                log::error!("Error setting ROI: {:#?}", e);
             }
             let roi = cam.get_roi();
-            println!(
+            log::info!(
                 "New ROI: {}x{} @ {}x{}",
-                roi.width, roi.height, roi.x_min, roi.y_min
+                roi.width,
+                roi.height,
+                roi.x_min,
+                roi.y_min
             );
         }
-
+        let mut current_exp = Duration::from_millis(100);
         cam.set_property(
             GenCamCtrl::Exposure(ExposureCtrl::ExposureTime),
             &(Duration::from_millis(100).into()),
@@ -200,88 +256,117 @@ pub fn camera_thread(
         .expect("Error setting exposure time");
         // gain settings
         if let Some(prop) = cam.list_properties().get(&AnalogCtrl::Gain.into()) {
-            println!("Gain Settings: {:#?}", prop);
+            log::info!("Gain Settings: {:#?}", prop);
         }
         if let Ok((gain, auto)) = cam.get_property(AnalogCtrl::Gain.into()) {
-            println!(
+            log::info!(
                 "Current gain: {:.1} dB, Auto mode: {}",
                 gain.as_f64().unwrap_or(-1.0),
                 auto
             );
         }
-        if let Some(gain) = cfg.settings.gain {
-            println!("Setting gain to {:.1} dB", gain);
-            cam.set_property(AnalogCtrl::Gain.into(), &gain.into(), false)
-                .expect("Error setting gain");
+        if let Some(gain) = ncfg.settings.gain {
+            if let Err(e) = cam.set_property(AnalogCtrl::Gain.into(), &gain.into(), false) {
+                cmd_success = false;
+                log::error!("Error setting gain: {:#?}", e);
+            } else {
+                log::info!("Setting gain to {:.1} dB", gain);
+            }
         } else {
             // set optimal gain for the cameras we use
             if info.name.contains("533") {
                 if let Err(e) = cam.set_property(AnalogCtrl::Gain.into(), &10.0f64.into(), false) {
-                    println!("Error setting camera gain: {e:#?}");
+                    log::warn!("Error setting camera gain: {e:#?}");
                 } else {
-                    println!("Setting {} gain to 10 dB", &info.name);
+                    log::info!("Setting {} gain to 10 dB", &info.name);
                 }
             } else if info.name.contains("432") {
                 if let Err(e) = cam.set_property(AnalogCtrl::Gain.into(), &14.0f64.into(), false) {
-                    println!("Error setting camera gain: {e:#?}");
+                    log::warn!("Error setting camera gain: {e:#?}");
                 } else {
-                    println!("Setting {} gain to 14 dB", &info.name);
+                    log::info!("Setting {} gain to 14 dB", &info.name);
                 }
             } else if info.name.contains("585") {
                 if let Err(e) = cam.set_property(AnalogCtrl::Gain.into(), &25.2f64.into(), false) {
-                    println!("Error setting camera gain: {e:#?}");
+                    log::warn!("Error setting camera gain: {e:#?}");
                 } else {
-                    println!("Setting {} gain to 25.2 dB", &info.name);
+                    log::info!("Setting {} gain to 25.2 dB", &info.name);
                 }
             }
         }
         // change to 8 bit?
-        if cfg.settings.pix8b {
-            println!("Setting pixel format to 8-bit");
-            cam.set_property(
+        if ncfg.settings.pix8b {
+            log::info!("Setting pixel format to 8-bit");
+            if let Err(e) = cam.set_property(
                 SensorCtrl::PixelFormat.into(),
                 &GenCamPixelBpp::Bpp8.into(),
                 false,
-            )
-            .expect("Error setting pixel format");
+            ) {
+                cmd_success = false;
+                log::error!("Error setting pixel format: {:#?}", e);
+                ncfg.settings.pix8b = false; // reset to default
+            }
         }
 
         let props = cam.list_properties();
         let exp_prop = props
             .get(&GenCamCtrl::Exposure(ExposureCtrl::ExposureTime))
             .expect("Error getting exposure property");
-        let mut exp_ctrl = cfg.autoexp.clone().get_controller();
+        let mut exp_ctrl = ncfg.autoexp.clone().get_controller();
         if let Ok(min_exp) = exp_prop.get_min() {
-            exp_ctrl = exp_ctrl.min_allowed_exp(min_exp.as_duration().unwrap());
+            let min_exp = min_exp.as_duration().unwrap();
+            let min_exp = min_exp.min(ncfg.autoexp.min_allowed_exp);
+            ncfg.autoexp.min_allowed_exp = min_exp;
+            exp_ctrl = exp_ctrl.min_allowed_exp(min_exp);
         }
-        let exp_ctrl = exp_ctrl.build().unwrap();
+        if let Ok(max_exp) = exp_prop.get_max() {
+            let max_exp = max_exp.as_duration().unwrap();
+            let max_exp = max_exp.min(ncfg.autoexp.max_allowed_exp);
+            ncfg.autoexp.max_allowed_exp = max_exp;
+            exp_ctrl = exp_ctrl.max_allowed_exp(max_exp);
+        }
+        let exp_ctrl = match exp_ctrl.build() {
+            Ok(exp_ctrl) => exp_ctrl,
+            Err(e) => {
+                cmd_success = false;
+                log::error!("Error building exposure controller: {:#?}", e);
+                let mut exp_ctrl = cfg.autoexp.clone().get_controller();
+                if let Ok(min_exp) = exp_prop.get_min() {
+                    exp_ctrl = exp_ctrl.min_allowed_exp(min_exp.as_duration().unwrap());
+                }
+                let exp_ctrl = exp_ctrl
+                    .build()
+                    .expect("Error building exposure controller"); // fallback
+                ncfg.autoexp = cfg.autoexp.clone(); // reset to default
+                exp_ctrl
+            }
+        };
+        if cmd_rcv {
+            let pack = if cmd_success {
+                Outgoing::Ack(magic)
+            } else {
+                Outgoing::Nack(magic)
+            };
+            if let Err(e) = data_sender.send(pack) {
+                log::error!("Error sending command ack: {:#?}", e);
+            }
+        }
         let mut last_saved = None;
-        'exposure_loop: while main_run.load(Ordering::SeqCst) && sub_run.load(Ordering::SeqCst) {
-            let _roi = cam.get_roi();
-            // println!(
-            //     "ROI: {}x{} @ {}x{}",
-            //     roi.width, roi.height, roi.x_min, roi.y_min
-            // );
+        'exposure_loop: while main_run.load(Ordering::Relaxed) && sub_run.load(Ordering::Relaxed) {
             let exp_start = Utc::now();
-            let img = {
-                let img = cam.capture();
-                match img {
-                    Ok(img) => img,
+            let exp_inst = Instant::now();
+            if cam.start_exposure().is_err() {
+                log::error!("Error starting exposure");
+                break 'exposure_loop;
+            }
+            // wait for the exposure to finish
+            tokio::time::sleep(current_exp).await;
+            // check if the exposure was cancelled
+            while main_run.load(Ordering::Relaxed) && sub_run.load(Ordering::Relaxed) {
+                match cam.image_ready() {
                     Err(e) => match e {
                         GenCamError::TimedOut => {
-                            if logfile
-                                .write(
-                                    format!(
-                                        "[{}] AERO: Timeout\n",
-                                        exp_start.format("%Y-%m-%d %H:%M:%S")
-                                    )
-                                    .as_bytes(),
-                                )
-                                .is_err()
-                            {
-                                println!("\nCould not write to log file");
-                            }
-                            println!("\n[{}] AERO: Timeout", exp_start.format("%H:%M:%S"));
+                            log::warn!("<{}> AERO: Timeout", exp_start.format("%H:%M:%S"));
                             continue;
                         }
                         GenCamError::ExposureNotStarted => {
@@ -289,21 +374,21 @@ pub fn camera_thread(
                             continue;
                         }
                         GenCamError::ExposureFailed(reason) => {
-                            println!("Error capturing image: {}, re-enumerating...", reason);
-                            sub_run.store(false, Ordering::SeqCst); // indicate to stop the housekeeping thread
+                            log::error!("Error capturing image: {}, re-enumerating...", reason);
+                            sub_run.store(false, Ordering::Relaxed); // indicate to stop the housekeeping thread
                             #[cfg(feature = "uhubctl_pi")]
                             {
                                 if uhubctl {
                                     if let Err(e) =
                                         Command::new("uhubctl").arg("-aoff").arg("-l2").output()
                                     {
-                                        println!("Error turning off USB hub: {:#?}", e);
+                                        log::error!("Error turning off USB hub: {:#?}", e);
                                     }
                                     sleep(Duration::from_secs(10));
                                     if let Err(e) =
                                         Command::new("uhubctl").arg("-aon").arg("-l2").output()
                                     {
-                                        println!("Error turning on USB hub: {:#?}", e);
+                                        log::error!("Error turning on USB hub: {:#?}", e);
                                     }
                                     sleep(Duration::from_secs(10));
                                 }
@@ -314,13 +399,13 @@ pub fn camera_thread(
                                     if let Err(e) =
                                         Command::new("uhubctl").arg("-aoff").arg("-l1").output()
                                     {
-                                        println!("Error turning off USB hub: {:#?}", e);
+                                        log::error!("Error turning off USB hub: {:#?}", e);
                                     }
                                     sleep(Duration::from_secs(5));
                                     if let Err(e) =
                                         Command::new("uhubctl").arg("-aon").arg("-l1").output()
                                     {
-                                        println!("Error turning on USB hub: {:#?}", e);
+                                        log::error!("Error turning on USB hub: {:#?}", e);
                                     }
                                     sleep(Duration::from_secs(5));
                                 }
@@ -331,73 +416,56 @@ pub fn camera_thread(
                             panic!("Error capturing image: {:?}", e);
                         }
                     },
+                    Ok(true) => {
+                        break;
+                    }
+                    Ok(false) => {
+                        // image not ready yet
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        continue;
+                    }
                 }
-            };
-            let img: GenericImage = img.into();
+            }
+            // download the image
+            let mut img = cam
+                .download_image()
+                .expect("Error downloading image after all checks");
+            // insert the delta time key
+            if let Err(e) = img.insert_key(
+                "DTIME",
+                (exp_inst - *REFCLK, "Time elapsed since program start"),
+            ) {
+                warn!("Error inserting DTIME key: {:#?}", e);
+            }
+            let mut img: GenericImage = img.into();
+            // check if it is time to send a new image
             let save = match last_saved {
                 None => true,
                 Some(last_saved) => {
                     let elapsed = Instant::now().duration_since(last_saved);
-                    elapsed > cfg.settings.cadence
+                    elapsed > ncfg.settings.cadence
                 }
             };
-            if let Some(exp) = img.get_exposure() {
-                // save the raw FITS image
-                if save {
-                    last_saved = Some(Instant::now());
-                    let dir_prefix =
-                        Path::new(&cfg.images.savedir).join(exp_start.format("%Y%m%d").to_string());
-                    if !dir_prefix.exists() {
-                        std::fs::create_dir_all(&dir_prefix).unwrap_or_else(|e| {
-                            panic!("Creating directory {:#?}: Error {e:?}", dir_prefix)
-                        });
-                    }
-                    if cfg.images.save_fits {
-                        let fitsfile =
-                            dir_prefix.join(exp_start.format("%Y%m%d%H%M%S%.3f.fits").to_string());
-                        match img.write_fits(&fitsfile, FitsCompression::Rice, true) {
-                            Ok(_) => {
-                                println!(
-                                    "\n[{}] AERO: Saved FITS image, exposure {:.3} s",
-                                    exp_start.format("%H:%M:%S"),
-                                    exp.as_secs_f32()
-                                );
-                            }
-                            Err(e) => {
-                                println!(
-                            "\n[{}] AERO: Failed to save FITS image, exposure {:.3} s: {:#?}",
-                            exp_start.format("%H:%M:%S"),
-                            exp.as_secs_f32(),
-                            e
-                        );
-                            }
-                        }
-                    }
-                }
-                // debayer the image if it is a Bayer image
-                let mut img = if img.color_space().is_bayer() {
-                    img.debayer(DemosaicMethod::Nearest)
-                        .expect("Error debayering image")
-                } else {
-                    img
-                };
-                // save the debayerd image as PNG if saving
-                if save && cfg.images.save_png {
-                    let dir_prefix =
-                        Path::new(&cfg.images.savedir).join(exp_start.format("%Y%m%d").to_string());
-                    if !dir_prefix.exists() {
-                        std::fs::create_dir_all(&dir_prefix).unwrap();
-                    }
-                    let dimg = DynamicImage::try_from(img.clone()).expect("Error converting image");
-                    let dimg = dimg.resize(1024, 1024, FilterType::Nearest);
-
-                    dimg.save(exp_start.format("%Y%m%d%H%M%S%.3f.png").to_string())
-                        .expect("Error saving image");
-                }
+            if save {
+                last_saved = Some(Instant::now());
                 // send the image to the clients
-                if image_source.send(img.to_owned().into()).is_err() {
-                    println!("\nError sending image to clients");
+                if data_sender
+                    .send({
+                        let img = GenericImageOwned::from(img.clone());
+                        Outgoing::ImageData(img)
+                    })
+                    .is_err()
+                {
+                    warn!("\nError sending image to clients");
                 }
+            }
+            // check for incoming commands
+            if let Ok(cmd) = rcv.try_recv() {
+                rcmd = Some(cmd);
+                log::info!("Received command: {:#?}", rcmd);
+            }
+            // if the image has a valid exposure time, calculate the optimal exposure
+            if let Some(exp) = img.get_exposure() {
                 // convert the image to grayscale
                 img.to_luma().expect("Error converting image to grayscale");
                 // calculate the optimal exposure
@@ -405,27 +473,35 @@ pub fn camera_thread(
                     .calc_opt_exp(&exp_ctrl, exp, 1)
                     .expect("Could not calculate optimal exposure");
                 if opt_exp != exp {
-                    println!(
-                        "\n[{}] AERO: Exposure changed from {:.6} s to {:.6} s",
+                    log::info!(
+                        "<{}> AERO: Exposure changed from {:.6} s to {:.6} s",
                         exp_start.format("%H:%M:%S"),
                         exp.as_secs_f32(),
                         opt_exp.as_secs_f32()
                     );
-                    cam.set_property(
-                        GenCamCtrl::Exposure(ExposureCtrl::ExposureTime),
-                        &opt_exp.into(),
-                        false,
-                    )
-                    .expect("Error setting exposure time");
+                    if cam
+                        .set_property(
+                            GenCamCtrl::Exposure(ExposureCtrl::ExposureTime),
+                            &opt_exp.into(),
+                            false,
+                        )
+                        .is_ok()
+                    {
+                        current_exp = opt_exp;
+                    } else {
+                        log::error!("Error setting exposure time");
+                    }
                 }
             } else {
-                println!(
-                    "\n[{}] AERO: No exposure value found",
+                log::error!(
+                    "<{}> AERO: No exposure value found",
                     exp_start.format("%H:%M:%S")
                 );
             }
+            if rcmd.is_some() {
+                continue 'cfg_loop;
+            }
         }
-        camthread.join().unwrap();
     }
-    println!("\nExiting");
+    *cfg = ncfg; // update the config with the new settings
 }

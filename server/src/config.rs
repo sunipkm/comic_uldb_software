@@ -1,4 +1,4 @@
-use std::{fs::File, path::Path};
+use std::{fs::File, path::{Path, PathBuf}, time::Duration};
 
 use packet::CameraConfig;
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,12 @@ pub struct ProgConfig {
     pub progname: String,
     pub rootdir: String,
     pub camconf: CameraConfig,
+    pub i2cdev: PathBuf,
+    pub i2c_cadence: Duration,
+    pub bnosensors: Vec<(String, u8)>,
+    pub mcpsensors: Vec<(String, u8)>,
+    pub gpsdev: String,
+    pub gpsbaud: u32,
 }
 
 impl ProgConfig {

@@ -1,9 +1,7 @@
 [package]
 name = "comic_uldb_server"
 version = "0.0.0"
-authors = [
-    "Sunip Mukherjee <sunipkmukherjee@gmail.com>",
-]
+authors = ["Sunip Mukherjee <sunipkmukherjee@gmail.com>"]
 edition = "2021"
 
 [dependencies]
@@ -31,12 +29,15 @@ generic-camera = { workspace = true, features = ["server", "dummy"] }
 bincode = { workspace = true }
 generic-camera-asi = "0.0.11"
 configparser = { version = "3.1", features = ["tokio"] }
-datastor = { git = "https://github.com/sunipkm/datastor" } 
+datastor = { git = "https://github.com/sunipkm/datastor" }
 linux-embedded-hal = { version = "0.4", features = ["async-tokio"] }
-mcp9808 = { git = "https://github.com/sunipkm/mcp9808-rs" }
+mcp9808 = { git = "https://github.com/sunipkm/mcp9808-rs", features = ["std"] }
 embedded-hal = "1.0.0"
 nix = { version = "0.29", features = ["time"] }
 ublox-gps-tec = { path = "../ublox-gps/ublox-gps" }
+bno055 = { git = "https://github.com/sunipkm/bno055", features = ["serde", "std"] }
+serialport = "4.7.1"
+tokio-serial = { version = "5.4.5", features = ["bytes", "codec", "libudev", "tokio-util"] }
 
 [features]
 default = ["uhubctl_toradex"]

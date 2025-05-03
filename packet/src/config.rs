@@ -1,6 +1,6 @@
-use refimage::{OptimumExposure, OptimumExposureBuilder};
+use refimage::OptimumExposureBuilder;
 use serde::{Deserialize, Serialize};
-use std::{fs::File, path::Path, time::Duration};
+use std::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OptimumExposureConf {
@@ -8,8 +8,8 @@ pub struct OptimumExposureConf {
     pixel_tgt: f32,
     pixel_uncertainty: f32,
     pixel_exclusion: u32,
-    min_allowed_exp: Option<Duration>,
-    max_allowed_exp: Option<Duration>,
+    pub min_allowed_exp: Duration,
+    pub max_allowed_exp: Duration,
     max_allowed_bin: Option<u16>,
 }
 
@@ -20,8 +20,8 @@ impl Default for OptimumExposureConf {
             pixel_tgt: 30000.0 / 65536.0,
             pixel_uncertainty: 2000.0 / 65536.0,
             pixel_exclusion: 100,
-            min_allowed_exp: Some(Duration::from_secs(1)),
-            max_allowed_exp: Some(Duration::from_secs(120)),
+            min_allowed_exp: Duration::from_secs(1),
+            max_allowed_exp: Duration::from_secs(120),
             max_allowed_bin: None,
         }
     }
@@ -33,15 +33,11 @@ impl OptimumExposureConf {
             .percentile_pix(self.percentile_pix)
             .pixel_tgt(self.pixel_tgt)
             .pixel_uncertainty(self.pixel_uncertainty)
-            .pixel_exclusion(self.pixel_exclusion);
+            .pixel_exclusion(self.pixel_exclusion)
+            .min_allowed_exp(self.min_allowed_exp)
+            .max_allowed_exp(self.max_allowed_exp);
         if let Some(max_bin) = self.max_allowed_bin {
             builder = builder.max_allowed_bin(max_bin);
-        }
-        if let Some(min_exp) = self.min_allowed_exp {
-            builder = builder.min_allowed_exp(min_exp);
-        }
-        if let Some(max_exp) = self.max_allowed_exp {
-            builder = builder.max_allowed_exp(max_exp);
         }
         builder
     }
@@ -80,28 +76,10 @@ impl CameraRoi {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CameraImageSav {
-    pub savedir: String,
-    pub save_fits: bool,
-    pub save_png: bool,
-}
-
-impl Default for CameraImageSav {
-    fn default() -> Self {
-        Self {
-            savedir: "./imagedata".to_string(),
-            save_fits: false,
-            save_png: true,
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct CameraConfig {
     pub name: Option<String>,
     pub settings: CameraSettings,
     pub roi: CameraRoi,
     pub autoexp: OptimumExposureConf,
-    pub images: CameraImageSav,
 }
