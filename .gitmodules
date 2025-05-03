@@ -1,0 +1,6 @@
+[submodule "bno055"]
+	path = bno055
+	url = https://github.com/sunipkm/bno055
+[submodule "mcp9808-rs"]
+	path = mcp9808-rs
+	url = https://github.com/sunipkm/mcp9808-rs
