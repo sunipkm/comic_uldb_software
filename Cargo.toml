@@ -15,3 +15,4 @@ refimage = { version = ">= 1.0.0-pre" }
 ublox-gps-tec = { path = "ublox-gps" }
 bno055 = { path = "bno055" }
 mcp9808 = { path = "mcp9808-rs" }
+datastor = { path = "datastor" }

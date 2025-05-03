@@ -4,3 +4,6 @@
 [submodule "mcp9808-rs"]
 	path = mcp9808-rs
 	url = https://github.com/sunipkm/mcp9808-rs
+[submodule "datastor"]
+	path = datastor
+	url = https://github.com/sunipkm/datastor

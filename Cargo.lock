@@ -1165,7 +1165,6 @@ checksum = "5c297a1c74b71ae29df00c3e22dd9534821d60eb9af5a0192823fa2acea70c2a"
 [[package]]
 name = "datastor"
 version = "0.0.1"
-source = "git+https://github.com/sunipkm/datastor#059df0945f581bccdc334a44ab279eadae95b2f3"
 dependencies = [
  "chrono",
  "flate2",
@@ -1174,6 +1173,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+ "tempfile",
 ]
 
 [[package]]
