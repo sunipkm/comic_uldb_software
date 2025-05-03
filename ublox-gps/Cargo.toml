@@ -1,0 +1,15 @@
+[package]
+name = "ublox-gps-tec"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+bitfield-struct = "0.9"
+chrono = { version = "0.4", features = ["default", "serde"]}
+lazy_static = "1.5"
+log = "0.4.22"
+num-traits = "0.2"
+regex = "1.11"
+serde = { version = "1.0", features = ["derive"] }
+serialport = "4.5"
+thiserror = "1.0"

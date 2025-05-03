@@ -1,0 +1,7 @@
+**/target
+**/*.bin
+**/*.txt
+**/yarn.lock
+**/node_modules
+!test
+!test/*.bin
