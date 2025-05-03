@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, time::Duration};
 
 use crate::{tempsensor::*, REFCLK};
 use bno055::{BNO055OperationMode, Bno055};
@@ -12,6 +12,7 @@ pub fn i2c_sensors_task(
     bnosensors: &Vec<(String, u8)>,
     mcpsensors: &Vec<(String, u8)>,
     cadence: Duration,
+    run: Arc<AtomicBool>,
     data_sink: tokio::sync::broadcast::Sender<Outgoing>,
 ) -> tokio::task::JoinHandle<()> {
     let mut i2c = i2c;
@@ -48,7 +49,7 @@ pub fn i2c_sensors_task(
             let mut bnos = bnos;
             let mut mcps = mcps;
             let mut i2c = i2c;
-            loop {
+            while run.load(Ordering::Relaxed) {
                 let i2c = &mut i2c;
                 let start = Instant::now();
                 for (loc, bno) in &mut bnos {

@@ -38,7 +38,7 @@ enum RawData {
 
 pub fn filestore_task(
     data_dir: &str,
-    done: Arc<AtomicBool>,
+    run: Arc<AtomicBool>,
     receiver: broadcast::Receiver<Outgoing>,
 ) -> (
     tokio::task::JoinHandle<()>,
@@ -49,12 +49,12 @@ pub fn filestore_task(
     let (raw_send, raw_recv) = std::sync::mpsc::channel();
 
     let commhdl = tokio::task::spawn({
-        let done = done.clone();
+        let run = run.clone();
         async move {
             let mut receiver = receiver;
             let img_sender = img_send;
             let raw_sender = raw_send;
-            while !done.load(Ordering::Relaxed) {
+            while run.load(Ordering::Relaxed) {
                 let msg = receiver.recv().await;
                 match msg {
                     Ok(Outgoing::ImageData(img)) => {
@@ -128,12 +128,12 @@ pub fn filestore_task(
 
     let imghdl = task::spawn_blocking({
         let data_dir = data_dir.to_string();
-        let done = done.clone();
+        let run = run.clone();
         move || {
             let mut imgstor =
                 datastor::ExecCountSingleFrame::<Fits>::new(&format!("{}/images", data_dir))
                     .expect("Failed to create image storage");
-            while !done.load(Ordering::Relaxed) {
+            while run.load(Ordering::Relaxed) {
                 match img_recv.recv() {
                     Ok(img) => {
                         if let Ok(file) = imgstor.store_custom_writer() {
@@ -155,7 +155,7 @@ pub fn filestore_task(
     });
     let i2cstorhdl = tokio::task::spawn_blocking({
         let data_dir = data_dir.to_string();
-        let done = done.clone();
+        let run = run.clone();
         move || {
             let mut tempstor = datastor::ExecCountHourly::<Binary>::new(
                 &format!("{}/temperature", data_dir),
@@ -175,7 +175,7 @@ pub fn filestore_task(
                 env!("CARGO_CRATE_NAME"),
             )
             .expect("Failed to create orientation storage");
-            while !done.load(Ordering::Relaxed) {
+            while run.load(Ordering::Relaxed) {
                 match raw_recv.recv() {
                     Ok(RawData::Temperature(dur, data)) => {
                         if let Err(e) = tempstor.store(&dur, data.as_slice()) {

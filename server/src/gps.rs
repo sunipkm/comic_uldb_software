@@ -9,7 +9,7 @@ use crate::REFCLK;
 pub fn gps_task(
     gpsdev: String,
     gpsbaud: u32,
-    done: Arc<AtomicBool>,
+    run: Arc<AtomicBool>,
     data_sink: tokio::sync::broadcast::Sender<Outgoing>,
 ) {
     match serialport::new(&gpsdev, gpsbaud)
@@ -20,7 +20,7 @@ pub fn gps_task(
             port.set_timeout(Duration::from_millis(100))
             .expect("Failed to set timeout");
             log::info!("Opened GPS device: {}", &gpsdev);
-            while !done.load(Ordering::Relaxed) {
+            while run.load(Ordering::Relaxed) {
                 let mut buf = Vec::with_capacity(2048);
                 if let Err(err) = port.read_to_end(&mut buf) {
                     if err.kind() != ErrorKind::TimedOut {

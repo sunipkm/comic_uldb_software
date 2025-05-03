@@ -61,8 +61,8 @@ async fn main() {
     let gpshandle = tokio::task::spawn_blocking({
         let gpsdev = config.gpsdev.clone();
         let data_sender = data_sender.clone();
-        let done = main_run.clone();
-        move || gps::gps_task(gpsdev, config.gpsbaud, done, data_sender)
+        let run = main_run.clone();
+        move || gps::gps_task(gpsdev, config.gpsbaud, run, data_sender)
     });
 
     // Open I2C port
@@ -72,6 +72,7 @@ async fn main() {
             &config.bnosensors,
             &config.mcpsensors,
             config.i2c_cadence,
+            main_run.clone(),
             data_sender.clone(),
         );
     }
