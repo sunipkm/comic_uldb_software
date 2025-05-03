@@ -50,14 +50,19 @@ async fn main() {
     let (data_sender, _) = broadcast::channel(100);
     let (config_sender, config_receiver) = broadcast::channel(10);
 
+    // create main thread control
+    let main_run = Arc::new(AtomicBool::new(true));
+
     // Create Data Storage thread
     let (comhdl, imghdl, i2cstorhdl) =
-        filestor::filestore_task(&config.rootdir, data_sender.subscribe());
+        filestor::filestore_task(&config.rootdir, main_run.clone(), data_sender.subscribe());
 
     // GPS thread
-    let gpshandle = tokio::spawn({
+    let gpshandle = tokio::task::spawn_blocking({
         let gpsdev = config.gpsdev.clone();
-        gps::gps_task(gpsdev, config.gpsbaud, data_sender.clone())
+        let data_sender = data_sender.clone();
+        let done = main_run.clone();
+        move || gps::gps_task(gpsdev, config.gpsbaud, done, data_sender)
     });
 
     // Open I2C port
@@ -75,9 +80,6 @@ async fn main() {
     let addr = "0.0.0.0:52000";
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
     info!("Listening on: {}", addr);
-
-    // create main thread control
-    let main_run = Arc::new(AtomicBool::new(true));
 
     // handle SIGINT
     let ctrlchdl = tokio::spawn({

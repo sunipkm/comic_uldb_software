@@ -1,28 +1,28 @@
 use std::{
-    io::ErrorKind,
-    time::{Duration, Instant},
+    io::ErrorKind, sync::{atomic::{AtomicBool, Ordering}, Arc}, time::{Duration, Instant}
 };
 
 use packet::{GpsRawMessage, Outgoing};
-use tokio::io::AsyncReadExt;
-use tokio_serial::SerialPortBuilderExt;
 
 use crate::REFCLK;
 
-pub async fn gps_task(
+pub fn gps_task(
     gpsdev: String,
     gpsbaud: u32,
+    done: Arc<AtomicBool>,
     data_sink: tokio::sync::broadcast::Sender<Outgoing>,
 ) {
-    match tokio_serial::new(&gpsdev, gpsbaud)
-        .timeout(Duration::from_millis(100))
-        .open_native_async()
+    match serialport::new(&gpsdev, gpsbaud)
+    .open()
+    // Set the timeout on the serial port
     {
         Ok(mut port) => {
+            port.set_timeout(Duration::from_millis(100))
+            .expect("Failed to set timeout");
             log::info!("Opened GPS device: {}", &gpsdev);
-            loop {
+            while !done.load(Ordering::Relaxed) {
                 let mut buf = Vec::with_capacity(2048);
-                if let Err(err) = port.read_to_end(&mut buf).await {
+                if let Err(err) = port.read_to_end(&mut buf) {
                     if err.kind() != ErrorKind::TimedOut {
                         log::error!("Error reading from GPS device: {}", err);
                         break;
@@ -52,4 +52,5 @@ pub async fn gps_task(
             log::error!("Failed to open GPS device: {}", e);
         }
     }
+    log::info!("GPS task finished");
 }

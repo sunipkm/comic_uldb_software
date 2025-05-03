@@ -1,3 +1,6 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
 use datastor::Binary;
@@ -35,89 +38,102 @@ enum RawData {
 
 pub fn filestore_task(
     data_dir: &str,
+    done: Arc<AtomicBool>,
     receiver: broadcast::Receiver<Outgoing>,
-) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
+) -> (
+    tokio::task::JoinHandle<()>,
+    tokio::task::JoinHandle<()>,
+    tokio::task::JoinHandle<()>,
+) {
     let (img_send, img_recv) = std::sync::mpsc::channel::<GenericImageOwned>();
     let (raw_send, raw_recv) = std::sync::mpsc::channel();
 
-    let commhdl = tokio::task::spawn(async move {
-        let mut receiver = receiver;
-        let img_sender = img_send;
-        let raw_sender = raw_send;
-        loop {
-            let msg = receiver.recv().await;
-            match msg {
-                Ok(Outgoing::ImageData(img)) => {
-                    img_sender.send(img).expect("Failed to send image data");
-                }
-                Ok(Outgoing::TempData(temp)) => {
-                    let dur = temp.now;
-                    match bincode::serialize(&temp) {
-                        Ok(temp) => {
-                            if let Err(e) = raw_sender.send(RawData::Temperature(dur, temp)) {
-                                log::error!(
-                                    "Failed to send temperature data to synchronous thread: {}",
-                                    e
-                                );
+    let commhdl = tokio::task::spawn({
+        let done = done.clone();
+        async move {
+            let mut receiver = receiver;
+            let img_sender = img_send;
+            let raw_sender = raw_send;
+            while !done.load(Ordering::Relaxed) {
+                let msg = receiver.recv().await;
+                match msg {
+                    Ok(Outgoing::ImageData(img)) => {
+                        img_sender.send(img).expect("Failed to send image data");
+                    }
+                    Ok(Outgoing::TempData(temp)) => {
+                        let dur = temp.now;
+                        match bincode::serialize(&temp) {
+                            Ok(temp) => {
+                                if let Err(e) = raw_sender.send(RawData::Temperature(dur, temp)) {
+                                    log::error!(
+                                        "Failed to send temperature data to synchronous thread: {}",
+                                        e
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Failed to serialize temperature data: {}", e);
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to serialize temperature data: {}", e);
-                        }
                     }
-                }
-                Ok(Outgoing::GpsRawMessage(msg)) => {
-                    let dur = msg.now;
-                    match bincode::serialize(&msg) {
-                        Ok(msg) => {
-                            if let Err(e) = raw_sender.send(RawData::GpsRaw(dur, msg)) {
-                                log::error!("Failed to send GPS data to synchronous thread: {}", e);
+                    Ok(Outgoing::GpsRawMessage(msg)) => {
+                        let dur = msg.now;
+                        match bincode::serialize(&msg) {
+                            Ok(msg) => {
+                                if let Err(e) = raw_sender.send(RawData::GpsRaw(dur, msg)) {
+                                    log::error!(
+                                        "Failed to send GPS data to synchronous thread: {}",
+                                        e
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Failed to serialize GPS data: {}", e);
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to serialize GPS data: {}", e);
-                        }
                     }
-                }
-                Ok(Outgoing::OrientationData(orient)) => {
-                    let dur = orient.now;
-                    match bincode::serialize(&orient) {
-                        Ok(orient) => {
-                            if let Err(e) = raw_sender.send(RawData::Orientation(dur, orient)) {
-                                log::error!(
-                                    "Failed to send orientation data to synchronous thread: {}",
-                                    e
-                                );
+                    Ok(Outgoing::OrientationData(orient)) => {
+                        let dur = orient.now;
+                        match bincode::serialize(&orient) {
+                            Ok(orient) => {
+                                if let Err(e) = raw_sender.send(RawData::Orientation(dur, orient)) {
+                                    log::error!(
+                                        "Failed to send orientation data to synchronous thread: {}",
+                                        e
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Failed to serialize orientation data: {}", e);
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to serialize orientation data: {}", e);
+                    }
+                    Ok(_) => {
+                        log::warn!("Received unknown packet type");
+                    }
+                    Err(e) => match e {
+                        broadcast::error::RecvError::Closed => {
+                            log::error!("Receiver closed");
+                            break;
                         }
-                    }
+                        broadcast::error::RecvError::Lagged(val) => {
+                            log::warn!("Receiver lagged by {} messages", val);
+                        }
+                    },
                 }
-                Ok(_) => {
-                    log::warn!("Received unknown packet type");
-                }
-                Err(e) => match e {
-                    broadcast::error::RecvError::Closed => {
-                        log::error!("Receiver closed");
-                        break;
-                    }
-                    broadcast::error::RecvError::Lagged(val) => {
-                        log::warn!("Receiver lagged by {} messages", val);
-                    }
-                },
             }
+            log::info!("Filestore comm task finished");
         }
     });
 
     let imghdl = task::spawn_blocking({
         let data_dir = data_dir.to_string();
+        let done = done.clone();
         move || {
             let mut imgstor =
                 datastor::ExecCountSingleFrame::<Fits>::new(&format!("{}/images", data_dir))
                     .expect("Failed to create image storage");
-            loop {
+            while !done.load(Ordering::Relaxed) {
                 match img_recv.recv() {
                     Ok(img) => {
                         if let Ok(file) = imgstor.store_custom_writer() {
@@ -134,10 +150,12 @@ pub fn filestore_task(
                     }
                 }
             }
+            log::info!("Filestore image task finished");
         }
     });
     let i2cstorhdl = tokio::task::spawn_blocking({
         let data_dir = data_dir.to_string();
+        let done = done.clone();
         move || {
             let mut tempstor = datastor::ExecCountHourly::<Binary>::new(
                 &format!("{}/temperature", data_dir),
@@ -157,7 +175,7 @@ pub fn filestore_task(
                 env!("CARGO_CRATE_NAME"),
             )
             .expect("Failed to create orientation storage");
-            loop {
+            while !done.load(Ordering::Relaxed) {
                 match raw_recv.recv() {
                     Ok(RawData::Temperature(dur, data)) => {
                         if let Err(e) = tempstor.store(&dur, data.as_slice()) {
@@ -186,6 +204,7 @@ pub fn filestore_task(
                     }
                 }
             }
+            log::info!("Filestore I2C task finished");
         }
     });
     (commhdl, imghdl, i2cstorhdl)
