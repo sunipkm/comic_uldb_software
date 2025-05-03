@@ -30,13 +30,13 @@ async fn main() {
     let mut config = config::ProgConfig::from_file(&PathBuf::from("config.json")).unwrap_or({
         let cfg = config::ProgConfig {
             progname: "CoMIC_ULDB".to_string(),
-            rootdir: "/media/card".to_string(),
+            rootdir: "./".to_string(),
             camconf: packet::CameraConfig::default(),
             i2cdev: PathBuf::from("/dev/i2c-3"),
             i2c_cadence: Duration::from_secs_f32(0.5),
             bnosensors: Vec::new(),
             mcpsensors: Vec::new(),
-            gpsdev: String::from("/dev/ttyUSB0"),
+            gpsdev: String::from("/dev/ttyAMA0"),
             gpsbaud: 115200,
         };
         serde_json::to_writer_pretty(
@@ -55,8 +55,10 @@ async fn main() {
         filestor::filestore_task(&config.rootdir, data_sender.subscribe());
 
     // GPS thread
-    let gpshandle = gps::gps_task(&config.gpsdev, config.gpsbaud, data_sender.clone())
-        .expect("Failed to spawn GPS task");
+    let gpshandle = tokio::spawn({
+        let gpsdev = config.gpsdev.clone();
+        gps::gps_task(gpsdev, config.gpsbaud, data_sender.clone())
+    });
 
     // Open I2C port
     if let Ok(i2cdev) = linux_embedded_hal::I2cdev::new(&config.i2cdev) {
@@ -113,7 +115,8 @@ async fn main() {
             &mut config.camconf,
             data_sender.clone(),
             config_receiver,
-        ).await;
+        )
+        .await;
     });
     let _ = tokio::join!(
         gpshandle,
