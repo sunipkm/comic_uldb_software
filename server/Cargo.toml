@@ -34,7 +34,7 @@ linux-embedded-hal = { version = "0.4", features = ["async-tokio"] }
 mcp9808 = { git = "https://github.com/sunipkm/mcp9808-rs", features = ["std"] }
 embedded-hal = "1.0.0"
 nix = { version = "0.29", features = ["time"] }
-ublox-gps-tec = { git = "https://github.com/sunipkm/ublox-gps" }
+ublox-gps-tec = { workspace = true }
 bno055 = { git = "https://github.com/sunipkm/bno055", features = ["serde", "std"] }
 serialport = "4.7.1"
 tokio-serial = { version = "5.4.5", features = ["bytes", "codec", "libudev", "tokio-util"] }
