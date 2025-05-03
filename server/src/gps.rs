@@ -14,13 +14,15 @@ pub fn gps_task(
     gpsbaud: u32,
     data_sink: tokio::sync::broadcast::Sender<Outgoing>,
 ) -> Result<tokio::task::JoinHandle<()>, String> {
-
-    match tokio_serial::new(gpsdev, gpsbaud).timeout(Duration::from_millis(200)).open_native_async() {
+    match tokio_serial::new(gpsdev, gpsbaud)
+        .timeout(Duration::from_millis(100))
+        .open_native_async()
+    {
         Ok(mut port) => {
             log::info!("Opened GPS device: {}", gpsdev);
             Ok(tokio::task::spawn(async move {
                 loop {
-                    let mut buf = Vec::with_capacity(8192);
+                    let mut buf = Vec::with_capacity(2048);
                     if let Err(err) = port.read_to_end(&mut buf).await {
                         if err.kind() != ErrorKind::TimedOut {
                             log::error!("Error reading from GPS device: {}", err);
@@ -36,7 +38,8 @@ pub fn gps_task(
                         GpsRawMessage {
                             now: now - *REFCLK,
                             msg: buf,
-                        }.into()
+                        }
+                        .into()
                     }) {
                         log::error!("Failed to send GPS data: {}", e);
                         break;
