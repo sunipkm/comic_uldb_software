@@ -1,0 +1,48 @@
+{
+  "progname": "CoMIC_ULDB",
+  "rootdir": "/media/card",
+  "bindaddr": "0.0.0.0",
+  "bindport": 52000,
+  "camconf": {
+    "name": null,
+    "settings": {
+      "cadence": {
+        "secs": 10,
+        "nanos": 0
+      },
+      "gain": null,
+      "target_temp": -10.0,
+      "pix8b": false
+    },
+    "roi": {
+      "x_min": 0,
+      "x_max": 0,
+      "y_min": 0,
+      "y_max": 0
+    },
+    "autoexp": {
+      "percentile_pix": 0.95,
+      "pixel_tgt": 0.45776367,
+      "pixel_uncertainty": 0.030517578,
+      "pixel_exclusion": 100,
+      "min_allowed_exp": {
+        "secs": 1,
+        "nanos": 0
+      },
+      "max_allowed_exp": {
+        "secs": 120,
+        "nanos": 0
+      },
+      "max_allowed_bin": null
+    }
+  },
+  "i2cdev": "/dev/i2c-3",
+  "i2c_cadence": {
+    "secs": 0,
+    "nanos": 500000000
+  },
+  "bnosensors": [["LEFT", 40], ["RIGHT", 41]],
+  "mcpsensors": [["FCL", 27], ["EPL", 28], ["LWL", 25], ["RWL", 24]],
+  "gpsdev": "/dev/ttymxc0",
+  "gpsbaud": 115200
+}

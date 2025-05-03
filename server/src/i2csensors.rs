@@ -42,6 +42,7 @@ pub fn i2c_sensors_task(
             log::error!("Failed to initialize BNO055 sensor: {}", loc);
             continue;
         }
+        log::info!("Initialized BNO055 sensor: {}", loc);
     }
     std::thread::sleep(Duration::from_secs(1)); // Give time for sensors to stabilize
     tokio::task::spawn({

@@ -83,8 +83,10 @@ where
     }
     /// Adds a new sensor to the list of sensors.
     pub fn add_sensor(&mut self, loc: &str, addr: SlaveAddress, res: ResolutionVal, i2c: &mut I2C) {
+        let uaddr = u8::from(addr);
         if let Ok(sensor) = Mcp9808Sensor::new(loc, addr, res, i2c) {
             self.sensors.push(sensor);
+            log::info!("Added temperature sensor: {} ({:x})", loc, uaddr);
         }
     }
 

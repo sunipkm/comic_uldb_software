@@ -30,3 +30,13 @@ impl ProgConfig {
         Ok(config)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn read_config() {
+        println!("{:#?}", ProgConfig::from_file(Path::new("test/config.json")));
+    }
+}
