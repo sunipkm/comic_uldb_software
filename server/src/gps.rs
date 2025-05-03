@@ -21,7 +21,7 @@ pub fn gps_task(
             .expect("Failed to set timeout");
             log::info!("Opened GPS device: {}", &gpsdev);
             while run.load(Ordering::Relaxed) {
-                let mut buf = Vec::with_capacity(2048);
+                let mut buf = Vec::with_capacity(8192);
                 if let Err(err) = port.read_to_end(&mut buf) {
                     if err.kind() != ErrorKind::TimedOut {
                         log::error!("Error reading from GPS device: {}", err);

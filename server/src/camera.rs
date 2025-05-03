@@ -128,7 +128,7 @@ pub async fn camera_thread(
                     if let Err(e) = caminfo.cancel_capture() {
                         log::warn!("Error cancelling capture: {:#?}", e);
                     }
-                    log::info!("\nExiting housekeeping thread");
+                    log::info!("Exiting housekeeping thread");
                 }
             })
         };
@@ -144,7 +144,7 @@ pub async fn camera_thread(
         .await;
         camthread.join().unwrap();
     }
-    log::info!("\nExiting");
+    log::info!("Exiting");
 }
 
 async fn image_capture(
@@ -508,4 +508,5 @@ async fn image_capture(
         }
     }
     *cfg = ncfg; // update the config with the new settings
+    log::info!("Exiting image capture function");
 }

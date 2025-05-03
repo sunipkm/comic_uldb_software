@@ -122,13 +122,12 @@ async fn main() {
         .await;
     });
     let _ = tokio::join!(
-        gpshandle,
-        camerahandle,
+        gpshandle, // closing
+        camerahandle, // closing
         nethandle,
-        comhdl,
-        imghdl,
+        comhdl, // closing
+        imghdl, // closing
         i2cstorhdl,
-        ctrlchdl
     );
     info!("Server exiting");
 }
