@@ -150,7 +150,7 @@ pub fn filestore_task(
                     }
                 }
             }
-            log::info!("Filestore image task finished");
+            log::info!("Filestore IMAGE task finished");
         }
     });
     let i2cstorhdl = tokio::task::spawn_blocking({
@@ -181,21 +181,21 @@ pub fn filestore_task(
                         if let Err(e) = tempstor.store(&dur, data.as_slice()) {
                             log::error!("Failed to store temperature data: {}", e);
                         } else {
-                            log::info!("Stored temperature data at {:?}", dur);
+                            log::trace!("Stored temperature data at {:?}", dur);
                         }
                     }
                     Ok(RawData::GpsRaw(dur, data)) => {
                         if let Err(e) = gpsstor.store(&dur, data.as_slice()) {
                             log::error!("Failed to store GPS data: {}", e);
                         } else {
-                            log::info!("Stored GPS data at {:?}", dur);
+                            log::trace!("Stored GPS data at {:?}", dur);
                         }
                     }
                     Ok(RawData::Orientation(dur, data)) => {
                         if let Err(e) = orientstor.store(&dur, data.as_slice()) {
                             log::error!("Failed to store orientation data: {}", e);
                         } else {
-                            log::info!("Stored orientation data at {:?}", dur);
+                            log::trace!("Stored orientation data at {:?}", dur);
                         }
                     }
                     Err(e) => {
@@ -204,7 +204,7 @@ pub fn filestore_task(
                     }
                 }
             }
-            log::info!("Filestore I2C task finished");
+            log::info!("Filestore BINARY task finished");
         }
     });
     (commhdl, imghdl, i2cstorhdl)

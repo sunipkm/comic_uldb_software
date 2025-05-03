@@ -80,10 +80,10 @@ async fn main() {
     // open TCP port
     let addr = "0.0.0.0:52000";
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
-    info!("Listening on: {}", addr);
+    trace!("Listening on: {}", addr);
 
     // handle SIGINT
-    let ctrlchdl = tokio::spawn({
+    let _ctrlchdl = tokio::spawn({
         let main_run = main_run.clone();
         async move {
             tokio::signal::ctrl_c().await.unwrap();
@@ -101,13 +101,14 @@ async fn main() {
                 let peer = stream
                     .peer_addr()
                     .expect("connected streams should have a peer address");
-                info!("Peer address: {}", peer);
+                trace!("Peer address: {}", peer);
                 let config = config_per.clone();
                 tokio::spawn({
                     let receiver = data.subscribe();
                     network::accept_connection(peer, stream, receiver, config, main_run.clone())
                 });
             }
+            trace!("Network accept thread exiting");
         }
     });
 
@@ -124,10 +125,10 @@ async fn main() {
     let _ = tokio::join!(
         gpshandle, // closing
         camerahandle, // closing
-        nethandle,
         comhdl, // closing
         imghdl, // closing
         i2cstorhdl,
     );
+    nethandle.abort();
     info!("Server exiting");
 }

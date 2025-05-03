@@ -45,7 +45,7 @@ pub async fn camera_thread(
         };
         match cmd {
             Ok(_) => {
-                log::info!("uhubctl exists");
+                log::trace!("uhubctl exists");
                 false
             }
             Err(e) => {
@@ -61,7 +61,7 @@ pub async fn camera_thread(
         let mut cfs = config_source.resubscribe();
         let mut drv = GenCamDriverAsi;
         let num_cameras = drv.available_devices();
-        log::info!("Found {} cameras", num_cameras);
+        log::trace!("Found {} cameras", num_cameras);
         if num_cameras == 0 {
             return;
         }
@@ -70,7 +70,7 @@ pub async fn camera_thread(
 
         let mut cam = {
             if let Some(cam_name) = &cfg.name {
-                log::info!("Connecting to camera: {}", cam_name);
+                log::trace!("Connecting to camera: {}", cam_name);
                 let devlist = drv.list_devices().expect("Could not list devices");
                 let dev = devlist
                     .iter()
@@ -114,7 +114,7 @@ pub async fn camera_thread(
                         }
                         // let stdout = io::stdout();
                         // let _ = write!(&mut stdout.lock(),
-                        log::info!(
+                        log::trace!(
                             "Camera temperature: {:>+05.1} C, Cooler Power: {:>3}%\t",
                             temp.try_into().unwrap_or(-273.15),
                             caminfo
@@ -184,26 +184,26 @@ async fn image_capture(
                 CameraCommand::Roi(m, roi) => {
                     ncfg.roi = roi;
                     magic = m;
-                    log::info!("Received ROI command: {:#?}", ncfg.roi);
+                    log::trace!("Received ROI command: {:#?}", ncfg.roi);
                 }
                 CameraCommand::ExposureConf(m, expconf) => {
                     magic = m;
                     ncfg.autoexp = expconf;
-                    log::info!("Received exposure command: {:#?}", ncfg.autoexp);
+                    log::trace!("Received exposure command: {:#?}", ncfg.autoexp);
                 }
                 CameraCommand::Settings(m, settings) => {
                     magic = m;
                     ncfg.settings = settings;
-                    log::info!("Received settings command: {:#?}", ncfg.settings);
+                    log::trace!("Received settings command: {:#?}", ncfg.settings);
                 }
                 CameraCommand::FullConf(m, fcfg) => {
                     magic = m;
                     ncfg = fcfg;
-                    log::info!("Received full config command: {:#?}", ncfg);
+                    log::trace!("Received full config command: {:#?}", ncfg);
                 }
             }
         }
-        log::info!(
+        log::trace!(
             "Setting target temperature: {} C",
             ncfg.settings.target_temp
         );
@@ -221,7 +221,7 @@ async fn image_capture(
 
         if ncfg.roi.change_roi() {
             let roi = cam.get_roi();
-            log::info!(
+            log::trace!(
                 "Current ROI: {}x{} @ {}x{}",
                 roi.width,
                 roi.height,
@@ -239,7 +239,7 @@ async fn image_capture(
                 log::error!("Error setting ROI: {:#?}", e);
             }
             let roi = cam.get_roi();
-            log::info!(
+            log::trace!(
                 "New ROI: {}x{} @ {}x{}",
                 roi.width,
                 roi.height,
@@ -256,10 +256,10 @@ async fn image_capture(
         .expect("Error setting exposure time");
         // gain settings
         if let Some(prop) = cam.list_properties().get(&AnalogCtrl::Gain.into()) {
-            log::info!("Gain Settings: {:#?}", prop);
+            log::trace!("Gain Settings: {:#?}", prop);
         }
         if let Ok((gain, auto)) = cam.get_property(AnalogCtrl::Gain.into()) {
-            log::info!(
+            log::trace!(
                 "Current gain: {:.1} dB, Auto mode: {}",
                 gain.as_f64().unwrap_or(-1.0),
                 auto
@@ -270,7 +270,7 @@ async fn image_capture(
                 cmd_success = false;
                 log::error!("Error setting gain: {:#?}", e);
             } else {
-                log::info!("Setting gain to {:.1} dB", gain);
+                log::trace!("Setting gain to {:.1} dB", gain);
             }
         } else {
             // set optimal gain for the cameras we use
@@ -278,25 +278,25 @@ async fn image_capture(
                 if let Err(e) = cam.set_property(AnalogCtrl::Gain.into(), &10.0f64.into(), false) {
                     log::warn!("Error setting camera gain: {e:#?}");
                 } else {
-                    log::info!("Setting {} gain to 10 dB", &info.name);
+                    log::trace!("Setting {} gain to 10 dB", &info.name);
                 }
             } else if info.name.contains("432") {
                 if let Err(e) = cam.set_property(AnalogCtrl::Gain.into(), &14.0f64.into(), false) {
                     log::warn!("Error setting camera gain: {e:#?}");
                 } else {
-                    log::info!("Setting {} gain to 14 dB", &info.name);
+                    log::trace!("Setting {} gain to 14 dB", &info.name);
                 }
             } else if info.name.contains("585") {
                 if let Err(e) = cam.set_property(AnalogCtrl::Gain.into(), &25.2f64.into(), false) {
                     log::warn!("Error setting camera gain: {e:#?}");
                 } else {
-                    log::info!("Setting {} gain to 25.2 dB", &info.name);
+                    log::trace!("Setting {} gain to 25.2 dB", &info.name);
                 }
             }
         }
         // change to 8 bit?
         if ncfg.settings.pix8b {
-            log::info!("Setting pixel format to 8-bit");
+            log::trace!("Setting pixel format to 8-bit");
             if let Err(e) = cam.set_property(
                 SensorCtrl::PixelFormat.into(),
                 &GenCamPixelBpp::Bpp8.into(),
@@ -466,7 +466,7 @@ async fn image_capture(
             // check for incoming commands
             if let Ok(cmd) = rcv.try_recv() {
                 rcmd = Some(cmd);
-                log::info!("Received command: {:#?}", rcmd);
+                log::trace!("Received command: {:#?}", rcmd);
             }
             // if the image has a valid exposure time, calculate the optimal exposure
             if let Some(exp) = img.get_exposure() {

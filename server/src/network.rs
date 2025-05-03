@@ -84,6 +84,7 @@ async fn handle_connection(
                     break;
                 }
             }
+            log::info!("WebSocket receiver thread exiting");
         }
     });
 
@@ -110,7 +111,8 @@ async fn handle_connection(
             }
         }
     }
-
+    log::info!("WebSocket sender thread exiting");
     ws_sender.close().await?;
+    log::info!("WebSocket connection closed: {}", peer);
     Ok(())
 }

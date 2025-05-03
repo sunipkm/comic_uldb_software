@@ -81,6 +81,7 @@ pub fn i2c_sensors_task(
                     log::warn!("Sensor read took too long: {:?}", elapsed);
                 }
             }
+            log::info!("I2C sensor task finished");
         }
     })
 }

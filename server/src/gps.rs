@@ -19,7 +19,7 @@ pub fn gps_task(
         Ok(mut port) => {
             port.set_timeout(Duration::from_millis(100))
             .expect("Failed to set timeout");
-            log::info!("Opened GPS device: {}", &gpsdev);
+            log::trace!("Opened GPS device: {}", &gpsdev);
             while run.load(Ordering::Relaxed) {
                 let mut buf = Vec::with_capacity(8192);
                 if let Err(err) = port.read_to_end(&mut buf) {
@@ -32,7 +32,7 @@ pub fn gps_task(
                 if buf.is_empty() {
                     continue;
                 }
-                log::info!("Received {} bytes from GPS device", buf.len());
+                log::trace!("Received {} bytes from GPS device", buf.len());
                 if let Err(e) = data_sink.send({
                     GpsRawMessage {
                         now: now - *REFCLK,
@@ -43,7 +43,7 @@ pub fn gps_task(
                     log::error!("Failed to send GPS data: {}", e);
                     break;
                 } else {
-                    log::info!("Sent GPS data to sink");
+                    log::trace!("Sent GPS data to sink");
                 }
             }
         }
