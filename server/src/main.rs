@@ -31,6 +31,8 @@ async fn main() {
         let cfg = config::ProgConfig {
             progname: "CoMIC_ULDB".to_string(),
             rootdir: "./".to_string(),
+            bindaddr: "0.0.0.0".to_string(),
+            bindport: 52000,
             camconf: packet::CameraConfig::default(),
             i2cdev: PathBuf::from("/dev/i2c-3"),
             i2c_cadence: Duration::from_secs_f32(0.5),
@@ -78,7 +80,7 @@ async fn main() {
     }
 
     // open TCP port
-    let addr = "0.0.0.0:52000";
+    let addr = format!("{}:{}", config.bindaddr, config.bindport);
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
     trace!("Listening on: {}", addr);
 
@@ -93,20 +95,29 @@ async fn main() {
 
     // network client thread
     let nethandle = tokio::spawn({
-        let main_run = main_run.clone();
+        let run = main_run.clone();
         let data = data_sender.clone();
         let config_per = config_sender.clone();
         async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let peer = stream
-                    .peer_addr()
-                    .expect("connected streams should have a peer address");
-                trace!("Peer address: {}", peer);
-                let config = config_per.clone();
-                tokio::spawn({
-                    let receiver = data.subscribe();
-                    network::accept_connection(peer, stream, receiver, config, main_run.clone())
-                });
+            while run.load(Ordering::Relaxed) {
+                tokio::select! {
+                    msg = listener.accept() => {
+                        if let Ok((stream, _)) = msg {
+                            let peer = stream
+                            .peer_addr()
+                            .expect("connected streams should have a peer address");
+                        trace!("Peer address: {}", peer);
+                        let config = config_per.clone();
+                        tokio::spawn({
+                            let receiver = data.subscribe();
+                            network::accept_connection(peer, stream, receiver, config, run.clone())
+                        });
+                        }
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {
+
+                    }
+                }
             }
             trace!("Network accept thread exiting");
         }
@@ -123,12 +134,12 @@ async fn main() {
         .await;
     });
     let _ = tokio::join!(
-        gpshandle, // closing
-        camerahandle, // closing
-        comhdl, // closing
-        imghdl, // closing
+        gpshandle,
+        camerahandle,
+        comhdl,
+        imghdl,
         i2cstorhdl,
+        nethandle,
     );
-    nethandle.abort();
     info!("Server exiting");
 }

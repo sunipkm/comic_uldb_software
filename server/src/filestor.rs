@@ -159,19 +159,19 @@ pub fn filestore_task(
         move || {
             let mut tempstor = datastor::ExecCountHourly::<Binary>::new(
                 &format!("{}/temperature", data_dir),
-                true,
+                false,
                 env!("CARGO_CRATE_NAME"),
             )
             .expect("Failed to create temperature storage");
             let mut gpsstor = datastor::ExecCountHourly::<Binary>::new(
                 &format!("{}/gpsraw", data_dir),
-                true,
+                false,
                 env!("CARGO_CRATE_NAME"),
             )
             .expect("Failed to create GPS storage");
             let mut orientstor = datastor::ExecCountHourly::<Binary>::new(
                 &format!("{}/orientation", data_dir),
-                true,
+                false,
                 env!("CARGO_CRATE_NAME"),
             )
             .expect("Failed to create orientation storage");

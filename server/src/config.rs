@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 pub struct ProgConfig {
     pub progname: String,
     pub rootdir: String,
+    pub bindaddr: String,
+    pub bindport: u16,
     pub camconf: CameraConfig,
     pub i2cdev: PathBuf,
     pub i2c_cadence: Duration,
