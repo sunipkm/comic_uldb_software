@@ -360,7 +360,20 @@ async fn image_capture(
                 break 'exposure_loop;
             }
             // wait for the exposure to finish
-            tokio::time::sleep(current_exp).await;
+            const MAX_WAIT: Duration = Duration::from_secs(2);
+            if current_exp < MAX_WAIT {
+                tokio::time::sleep(current_exp).await;
+            } else {
+                let start = Instant::now();
+                while main_run.load(Ordering::Relaxed) && sub_run.load(Ordering::Relaxed) {
+                    tokio::time::sleep(MAX_WAIT).await;
+                    let elapsed = start.elapsed();
+                    if current_exp - elapsed < MAX_WAIT {
+                        tokio::time::sleep(current_exp - elapsed).await;
+                        break;
+                    }
+                }
+            }
             // check if the exposure was cancelled
             while main_run.load(Ordering::Relaxed) && sub_run.load(Ordering::Relaxed) {
                 match cam.image_ready() {
