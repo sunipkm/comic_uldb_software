@@ -31,6 +31,7 @@ pub fn gps_task(
                     if buf.is_empty() {
                         continue;
                     }
+                    log::info!("Received {} bytes from GPS device", buf.len());
                     if let Err(e) = data_sink.send({
                         GpsRawMessage {
                             now: now - *REFCLK,
@@ -39,6 +40,8 @@ pub fn gps_task(
                     }) {
                         log::error!("Failed to send GPS data: {}", e);
                         break;
+                    } else {
+                        log::info!("Sent GPS data to sink");
                     }
                 }
             }))

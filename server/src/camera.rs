@@ -427,9 +427,13 @@ async fn image_capture(
                 }
             }
             // download the image
-            let mut img = cam
-                .download_image()
-                .expect("Error downloading image after all checks");
+            let mut img = match cam.download_image() {
+                Ok(img) => img,
+                Err(e) => {
+                    log::error!("Error downloading image: {:#?}", e);
+                    break 'exposure_loop;
+                }
+            };
             // insert the delta time key
             if let Err(e) = img.insert_key(
                 "DTIME",

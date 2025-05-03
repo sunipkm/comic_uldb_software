@@ -16,7 +16,7 @@ pub struct OptimumExposureConf {
 impl Default for OptimumExposureConf {
     fn default() -> Self {
         Self {
-            percentile_pix: 95.0,
+            percentile_pix: 0.95,
             pixel_tgt: 30000.0 / 65536.0,
             pixel_uncertainty: 2000.0 / 65536.0,
             pixel_exclusion: 100,
