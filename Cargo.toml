@@ -11,4 +11,3 @@ packet = { path = "packet" }
 generic-camera = { version = ">= 0.0.10" }
 bincode = { version = "1.3" }
 refimage = { version = ">= 1.0.0-pre" }
-ublox-gps-tec = { path = "ublox-gps/ublox-gps" }

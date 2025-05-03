@@ -4718,6 +4718,7 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 [[package]]
 name = "ublox-gps-tec"
 version = "0.0.1"
+source = "git+https://github.com/sunipkm/ublox-gps#1ee7569d7f82b85ac90e828889c6ec23a2d66fc5"
 dependencies = [
  "bitfield-struct",
  "chrono",
